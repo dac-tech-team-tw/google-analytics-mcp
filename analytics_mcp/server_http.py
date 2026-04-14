@@ -9,21 +9,13 @@ Entry point: ``analytics-mcp-http`` (see pyproject.toml).
 Environment variables: see .env.example.
 """
 
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from contextvars import copy_context
-from typing import Any, Dict, List
 
 from fastmcp import FastMCP
-from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
-from starlette.routing import Route
 
-from analytics_mcp.auth import get_user_credentials, init_token_store
 from analytics_mcp.auth_provider import create_google_provider
-from analytics_mcp.storage.gcs import GCSTokenStore
 from analytics_mcp.tools.utils import _current_credentials
 
 # GA4 tool implementations (unchanged from stdio version)
@@ -54,29 +46,31 @@ _AUTH_REQUIRED_ERROR = (
 def _with_user_credentials(func):
     """Wrap a GA4 tool to inject per-user Google credentials via contextvar.
 
-    Before calling the underlying function, resolves the authenticated user's
-    Google credentials from the TokenStore and sets the ``_current_credentials``
-    contextvar so that ``create_*_api_client()`` picks them up automatically.
-
-    Returns the _AUTH_REQUIRED_ERROR string when credentials are unavailable.
+    FastMCP's GoogleProvider acts as an OAuth proxy: it holds the Google
+    refresh token internally and always passes a valid Google access token
+    as the Bearer token on each request.  We extract that access token via
+    ``get_access_token().token`` and build a ``google.oauth2.credentials.Credentials``
+    object directly — no secondary token store required.
     """
     import functools
+
+    import google.oauth2.credentials
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         try:
             from fastmcp.server.dependencies import get_access_token
             token = get_access_token()
-            user_id = token.claims.get("sub")
+            google_access_token = token.token
         except Exception:
             return _AUTH_REQUIRED_ERROR
 
-        if not user_id:
+        if not google_access_token:
             return _AUTH_REQUIRED_ERROR
 
-        credentials = await get_user_credentials(user_id)
-        if credentials is None:
-            return _AUTH_REQUIRED_ERROR
+        credentials = google.oauth2.credentials.Credentials(
+            token=google_access_token
+        )
 
         # Set the contextvar for this async task so all nested calls to
         # create_*_api_client() use this user's credentials.
@@ -90,65 +84,13 @@ def _with_user_credentials(func):
 
 
 # ---------------------------------------------------------------------------
-# OAuth callback interceptor
-# ---------------------------------------------------------------------------
-# FastMCP's GoogleProvider handles /auth/callback internally.
-# We add an additional route /auth/store-token that is called BEFORE the
-# standard callback via a redirect chain, so we can capture and persist the
-# Google access token for use in GA4 API calls.
-#
-# Flow:
-#   Google → /auth/callback (GoogleProvider) → issues FastMCP JWT
-#
-# GoogleProvider stores the OAuth tokens internally.  We intercept the
-# callback by patching the provider's _handle_callback method after the
-# server is initialised so we can persist tokens to GCSTokenStore.
-
-def _patch_provider_callback(provider, token_store):
-    """Monkey-patch GoogleProvider to persist GA4 tokens to our TokenStore.
-
-    Called once during lifespan startup after the provider is created.
-    """
-    original_handle = getattr(provider, "_handle_callback", None)
-    if original_handle is None:
-        logger.warning(
-            "GoogleProvider._handle_callback not found; "
-            "GA4 token persistence will not work."
-        )
-        return
-
-    import functools
-
-    @functools.wraps(original_handle)
-    async def patched_handle_callback(request: Request):
-        # Run the original handler first so GoogleProvider validates the flow
-        response = await original_handle(request)
-
-        # Try to extract and store the Google tokens from GoogleProvider's
-        # internal state.  GoogleProvider stores token info as attributes set
-        # during the callback; we access them via the request's app state.
-        try:
-            state = getattr(request.state, "_ga4_token_data", None)
-            if state:
-                await token_store.set(state["user_id"], state)
-        except Exception as exc:
-            logger.warning("Could not persist GA4 token: %s", exc)
-
-        return response
-
-    provider._handle_callback = patched_handle_callback
-
-
-# ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     """Initialise shared resources at startup."""
-    token_store = GCSTokenStore()
-    init_token_store(token_store)
-    logger.info("GCSTokenStore initialised.")
+    logger.info("GA4 MCP HTTP server starting up.")
     yield
     logger.info("GA4 MCP HTTP server shutting down.")
 
