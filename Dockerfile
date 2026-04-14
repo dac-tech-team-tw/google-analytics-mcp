@@ -10,7 +10,7 @@ COPY pyproject.toml .
 COPY analytics_mcp/ analytics_mcp/
 
 # Regular (non-editable) install so the package is embedded in the image
-RUN pip install --no-cache-dir . 2>/dev/null || pip install --no-cache-dir .
+RUN pip install --no-cache-dir --retries 3 .
 
 # Switch to non-root user
 USER appuser

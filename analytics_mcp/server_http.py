@@ -9,6 +9,7 @@ Entry point: ``analytics-mcp-http`` (see pyproject.toml).
 Environment variables: see .env.example.
 """
 
+import datetime
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -55,21 +56,28 @@ def _with_user_credentials(func):
     import functools
 
     import google.oauth2.credentials
+    from fastmcp.server.dependencies import get_access_token
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            from fastmcp.server.dependencies import get_access_token
             token = get_access_token()
             google_access_token = token.token
+        except LookupError:
+            return _AUTH_REQUIRED_ERROR
         except Exception:
+            logger.exception("Unexpected error retrieving access token")
             return _AUTH_REQUIRED_ERROR
 
         if not google_access_token:
             return _AUTH_REQUIRED_ERROR
 
+        # Set expiry well into the future so google-auth never attempts to
+        # refresh this token object (it has no refresh_token / token_uri).
+        # FastMCP's GoogleProvider guarantees the token is already valid.
         credentials = google.oauth2.credentials.Credentials(
-            token=google_access_token
+            token=google_access_token,
+            expiry=datetime.datetime.utcnow() + datetime.timedelta(minutes=55),
         )
 
         # Set the contextvar for this async task so all nested calls to

@@ -57,10 +57,17 @@ _READ_ONLY_ANALYTICS_SCOPE = (
 def _create_credentials(
     credentials: google.auth.credentials.Credentials | None = None,
 ) -> google.auth.credentials.Credentials:
-    """Returns credentials for API calls.
+    """Returns credentials for API calls using a three-tier priority:
 
-    Uses the provided credentials when given (HTTP/OAuth mode).
-    Falls back to Application Default Credentials (stdio mode).
+    1. Explicit ``credentials`` argument — used when a caller passes credentials
+       directly (e.g. tests, future programmatic use).
+    2. ``_current_credentials`` contextvar — set by ``_with_user_credentials``
+       in server_http.py before each tool call in HTTP/OAuth mode.
+    3. Application Default Credentials (ADC) — fallback for stdio mode where
+       no contextvar has been set.
+
+    Do not pass an explicit ``credentials`` argument in tool code; use the
+    contextvar path instead so per-request isolation is preserved.
     """
     if credentials is not None:
         return credentials
