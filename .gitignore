@@ -66,3 +66,9 @@ system_tests/local_test_setup
 pylintrc
 pylintrc.test
 
+# Local environment variables (contains secrets)
+.env
+
+# Deployment scripts (machine-specific config)
+deploy.sh
+

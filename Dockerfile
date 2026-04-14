@@ -5,12 +5,12 @@ RUN useradd --create-home --shell /bin/bash appuser
 
 WORKDIR /app
 
-# Install dependencies first (cache layer)
+# Copy source first (needed for regular install)
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || pip install --no-cache-dir -e .
-
-# Copy source
 COPY analytics_mcp/ analytics_mcp/
+
+# Regular (non-editable) install so the package is embedded in the image
+RUN pip install --no-cache-dir . 2>/dev/null || pip install --no-cache-dir .
 
 # Switch to non-root user
 USER appuser
@@ -20,4 +20,4 @@ ENV PORT=8000
 
 EXPOSE ${PORT}
 
-CMD ["sh", "-c", "analytics-mcp-http"]
+CMD ["analytics-mcp-http"]

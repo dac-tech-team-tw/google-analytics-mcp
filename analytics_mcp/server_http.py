@@ -200,8 +200,8 @@ def run_server() -> None:
     port = int(os.environ.get("PORT", 8000))
     app = create_app()
 
-    logger.info("Starting GA4 MCP HTTP server on port %d", port)
-    app.run(transport="http", port=port)
+    logger.info("Starting GA4 MCP HTTP server on 0.0.0.0:%d", port)
+    app.run(transport="http", host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
