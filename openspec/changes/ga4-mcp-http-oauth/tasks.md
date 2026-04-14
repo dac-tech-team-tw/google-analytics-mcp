@@ -7,18 +7,14 @@
 
 ## 2. Token Storage 模組
 
-- [x] 2.1 建立 `analytics_mcp/storage/__init__.py`
-- [x] 2.2 建立 `analytics_mcp/storage/base.py`，定義 `TokenStore` ABC（`get`、`set`、`delete` 非同步方法）
-- [x] 2.3 建立 `analytics_mcp/storage/gcs.py`，實作 `GCSTokenStore`：
-  - 從 `GCS_BUCKET_NAME`、`TOKEN_ENCRYPTION_KEY` 環境變數初始化
-  - 路徑格式：`tokens/{google_user_id}.enc`
-  - Fernet 加密 / 解密
-  - `get()` 回傳 `None`（不存在時）
-  - 啟動時驗證環境變數存在，否則拋出明確錯誤
-- [x] 2.4 在 `GCSTokenStore.get()` 實作 token refresh 邏輯：
-  - 檢查 `token_expiry`，若過期使用 `refresh_token` 呼叫 Google Token Endpoint
-  - 更新後寫回 GCS
-  - 若 `invalid_grant`，刪除該使用者 token 並回傳 `None`
+> **⚠️ 後來發現不需要** — FastMCP 的 `GoogleProvider` 本身即為 OAuth Proxy，
+> 每次 tool call 時 Bearer token 就是有效的 Google access token，不需要自行管理 token 儲存。
+> 下列任務雖已實作，但在整合測試後全數刪除（見 6.3）。
+
+- [x] 2.1 建立 `analytics_mcp/storage/__init__.py`（已刪除）
+- [x] 2.2 建立 `analytics_mcp/storage/base.py`，定義 `TokenStore` ABC（已刪除）
+- [x] 2.3 建立 `analytics_mcp/storage/gcs.py`，實作 `GCSTokenStore`（已刪除）
+- [x] 2.4 在 `GCSTokenStore.get()` 實作 token refresh 邏輯（已刪除）
 
 ## 3. Per-user Credentials 整合
 
@@ -27,7 +23,7 @@
   - `create_admin_api_client(credentials=None)` 接受可選 credentials 參數
   - `create_admin_alpha_api_client(credentials=None)` 接受可選 credentials 參數
   - 未傳入時退回 `google.auth.default()`（向下相容 stdio 模式）
-- [x] 3.2 建立 `analytics_mcp/auth.py`，提供 `get_user_credentials(user_id: str) -> google.auth.credentials.Credentials | None` 輔助函式，從 `TokenStore` 取得並建立 credentials 物件
+- [x] 3.2 建立 `analytics_mcp/auth.py`，提供 `get_user_credentials(user_id: str) -> google.auth.credentials.Credentials | None` 輔助函式（整合測試後發現不需要，已刪除）
 - [x] 3.3 修改所有工具函式（`tools/reporting/core.py`、`realtime.py`、`metadata.py`、`tools/admin/info.py`）：
   - 採用 `_with_user_credentials` wrapper 於 `server_http.py`，透過 contextvar 注入 credentials
   - 工具函式本身不需修改 signature（contextvar 在 `create_*_api_client()` 中自動讀取）
@@ -54,5 +50,5 @@
 
 - [x] 6.1 為 `GCSTokenStore` 撰寫單元測試（mock GCS client）
 - [x] 6.2 為 `get_user_credentials()` 撰寫單元測試
-- [ ] 6.3 本機以 `fastmcp dev` 執行 HTTP transport 驗證 OAuth flow 是否正常（整合測試）
+- [x] 6.3 部署至 Cloud Run，以 Claude Code MCP client 驗證 OAuth flow 與 GA4 API 呼叫正常（整合測試通過）
 - [x] 6.4 確認現有 `tests/utils_test.py` 測試在修改 `utils.py` 後仍通過（14/14 passed）

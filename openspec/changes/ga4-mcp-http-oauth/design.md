@@ -52,51 +52,43 @@ Google Analytics MCP 目前以 stdio transport 運作，每位使用者需在本
 
 ---
 
-### 決策 3：Token Storage 抽象化，預設 GCS 實作
+### 決策 3：不需要自訂 Token Storage（實際驗證後修訂）
 
-**選擇**：定義 `TokenStore` ABC，提供 `GCSTokenStore` 實作
+**原始設計**：定義 `TokenStore` ABC，提供 `GCSTokenStore` 實作，將 Google tokens 存至 GCS。
 
-```
-analytics_mcp/storage/
-├── __init__.py
-├── base.py      ← TokenStore ABC
-└── gcs.py       ← GCSTokenStore（Fernet 加密）
-```
+**實際行為（整合測試後發現）**：FastMCP 的 `GoogleProvider` 本身就是 OAuth Proxy，它在內部持有 refresh token，並在每次請求時向 MCP client 傳遞有效的 Google access token 作為 Bearer token。
 
-**理由**：
-- GCS 對 Cloud Run 友善，不需管理 Redis instance，成本低
-- Token 讀寫僅發生在 OAuth flow 與 token refresh，不影響每次 API 呼叫效能
-- 抽象介面讓社群可自行實作 Redis、Firestore、DynamoDB 等後端
-- 40 人規模遠低於 GCS 的任何限制
+因此 GCS token 儲存層、Fernet 加密、`TokenStore` ABC 全數不需要，已從 codebase 移除。
 
-**GCS 路徑設計**：`tokens/{google_user_id}.enc`（每人一個加密檔案）
+**依賴清理**：`google-cloud-storage`、`cryptography`、`google-auth-oauthlib` 從 `pyproject.toml` 移除。
 
-**加密**：Fernet 對稱加密（`TOKEN_ENCRYPTION_KEY` 環境變數），GCS 本身另有 at-rest 加密
-
-**備選方案**：Redis（Cloud Memorystore）—— 需 VPC 設定、固定費用、管理成本，對 40 人內部工具不划算，不採用。
+**需要的環境變數**（比原設計少）：
+- `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`（OAuth App）
+- `BASE_URL`（Cloud Run 服務 URL）
+- `JWT_SIGNING_KEY`（FastMCP session token 簽章）
 
 ---
 
-### 決策 4：Per-user credentials 橋接機制
+### 決策 4：Per-user credentials 直接從 Bearer token 取得（實際驗證後修訂）
 
-**選擇**：在 OAuth callback 時將 Google access token + refresh token 存入 `TokenStore`，工具執行時從 session 取出 `user_id` 再查 store 取得 credentials
+**原始設計**：透過 `user_id` 查 `TokenStore` 取得儲存的 Google credentials。
+
+**實際實作**：`get_access_token().token` 本身即為有效的 Google access token，直接建立 credentials 物件即可，無需任何二次儲存或查詢。
 
 ```python
-# 工具內取得 per-user credentials
-token = get_access_token()          # FastMCP JWT session token
-user_id = token.claims["sub"]       # Google user ID
-stored = await token_store.get(user_id)
+# _with_user_credentials wrapper（server_http.py）
+token = get_access_token()          # FastMCP 驗證後的 access token
+google_access_token = token.token   # 即 Google access token（ya29.xxx）
 credentials = google.oauth2.credentials.Credentials(
-    token=stored["access_token"],
-    refresh_token=stored["refresh_token"],
-    ...
+    token=google_access_token
 )
-client = data_v1beta.BetaAnalyticsDataAsyncClient(credentials=credentials)
+# 設進 contextvar，所有 create_*_api_client() 自動取用
+ctx_token = _current_credentials.set(credentials)
 ```
 
-**理由**：GA4 API 需要使用者的 Google access token（而非 FastMCP 內部的 JWT），兩者必須橋接。refresh token 確保 access token 過期後能自動更新，無需重新登入。
+**Token refresh**：FastMCP 的 `GoogleProvider` 使用 `access_type=offline` + `prompt=consent` 取得 refresh token，並在 token 過期時自動刷新，對應用層完全透明。
 
-**備選方案**：共用 Service Account —— 無法區分各使用者的 GA4 存取權，且需為每個使用者額外設定 IAM，不採用。
+**備選方案**：共用 Service Account —— 無法區分各使用者的 GA4 存取權，不採用。
 
 ---
 
@@ -114,20 +106,17 @@ mcp.run(transport="http", port=int(os.environ.get("PORT", 8000)))
 
 ## Risks / Trade-offs
 
-**[風險] Google access token 過期（1 小時）**
-→ 在 `GCSTokenStore.get()` 加入 token expiry 檢查，過期時使用 refresh token 呼叫 Google Token Endpoint 更新，並將新 token 寫回 GCS。
+**[已解決] Google access token 過期（1 小時）**
+→ FastMCP 的 `GoogleProvider` 以 `access_type=offline` 取得 refresh token，token 過期時由 FastMCP 自動刷新，應用層無需處理。
 
-**[風險] FastMCP GoogleProvider 的 token storage 介面與自訂 `TokenStore` 的整合方式**
-→ 需確認 `GoogleProvider` 的 `client_storage` 參數接受的介面，若不相容則需包裝 adapter。實作前須先驗證。
+**[已解決] FastMCP GoogleProvider 的 token storage 整合**
+→ 整合測試後確認 `GoogleProvider` 本身即為 OAuth Proxy，每次 request 的 Bearer token 就是有效的 Google access token，不需要自訂 token storage。GCS 方案已移除。
 
-**[Trade-off] GCS 延遲 vs Redis**
-→ 每次工具呼叫多一次 GCS 讀取（~50-100ms），對分析報表工具可接受。若未來有效能需求，可在 Lifespan 中加 in-memory cache（每個 Cloud Run instance 快取該 instance 服務的 tokens）。
+**[已消除] GCS 延遲 vs Redis**
+→ 由於不再使用 GCS 儲存 token，此 trade-off 不復存在。每次工具呼叫不需額外 I/O。
 
-**[風險] Cloud Run 多 instance 時 in-memory cache 不一致**
-→ 初版不做 in-memory cache，直接讀 GCS，確保正確性。效能問題待量測後再優化。
-
-**[風險] Fernet key 外洩**
-→ 透過 Secret Manager 注入，不寫入環境變數明文。Cloud Run SA 的 Secret Manager accessor 權限最小化。
+**[風險] FastMCP client_storage 預設儲存位置**
+→ FastMCP `GoogleProvider` 的 `client_storage` 預設使用 `platformdirs` 的本機檔案系統。Cloud Run 為 stateless ephemeral container，重啟後會遺失。但這只影響 MCP client 的 OAuth 狀態（需重新登入），不影響資料正確性。可在未來傳入 `client_storage` 參數使用持久化後端解決。
 
 ---
 
