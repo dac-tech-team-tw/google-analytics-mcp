@@ -14,6 +14,7 @@
 
 """Common utilities used by the MCP server."""
 
+from contextvars import ContextVar
 from typing import Any, Dict
 
 from google.analytics import admin_v1beta, data_v1beta, admin_v1alpha
@@ -21,6 +22,14 @@ from google.api_core.gapic_v1.client_info import ClientInfo
 from importlib import metadata
 import google.auth
 import proto
+
+# Per-request credentials contextvar.
+# Set by the HTTP server before each tool call; tools read it via the
+# create_*_api_client() helpers below.  Defaults to None, which causes the
+# helpers to fall back to Application Default Credentials (stdio mode).
+_current_credentials: ContextVar = ContextVar(
+    "current_credentials", default=None
+)
 
 
 def _get_package_version_with_fallback():
@@ -45,40 +54,54 @@ _READ_ONLY_ANALYTICS_SCOPE = (
 )
 
 
-def _create_credentials() -> google.auth.credentials.Credentials:
-    """Returns Application Default Credentials with read-only scope."""
-    credentials, _ = google.auth.default(scopes=[_READ_ONLY_ANALYTICS_SCOPE])
-    return credentials
+def _create_credentials(
+    credentials: google.auth.credentials.Credentials | None = None,
+) -> google.auth.credentials.Credentials:
+    """Returns credentials for API calls using a three-tier priority:
 
+    1. Explicit ``credentials`` argument — used when a caller passes credentials
+       directly (e.g. tests, future programmatic use).
+    2. ``_current_credentials`` contextvar — set by ``_with_user_credentials``
+       in server_http.py before each tool call in HTTP/OAuth mode.
+    3. Application Default Credentials (ADC) — fallback for stdio mode where
+       no contextvar has been set.
 
-def create_admin_api_client() -> admin_v1beta.AnalyticsAdminServiceAsyncClient:
-    """Returns a properly configured Google Analytics Admin API async client.
-
-    Uses Application Default Credentials with read-only scope.
+    Do not pass an explicit ``credentials`` argument in tool code; use the
+    contextvar path instead so per-request isolation is preserved.
     """
+    if credentials is not None:
+        return credentials
+    per_request = _current_credentials.get()
+    if per_request is not None:
+        return per_request
+    fallback, _ = google.auth.default(scopes=[_READ_ONLY_ANALYTICS_SCOPE])
+    return fallback
+
+
+def create_admin_api_client(
+    credentials: google.auth.credentials.Credentials | None = None,
+) -> admin_v1beta.AnalyticsAdminServiceAsyncClient:
+    """Returns a properly configured Google Analytics Admin API async client."""
     return admin_v1beta.AnalyticsAdminServiceAsyncClient(
-        client_info=_CLIENT_INFO, credentials=_create_credentials()
+        client_info=_CLIENT_INFO, credentials=_create_credentials(credentials)
     )
 
 
-def create_data_api_client() -> data_v1beta.BetaAnalyticsDataAsyncClient:
-    """Returns a properly configured Google Analytics Data API async client.
-
-    Uses Application Default Credentials with read-only scope.
-    """
+def create_data_api_client(
+    credentials: google.auth.credentials.Credentials | None = None,
+) -> data_v1beta.BetaAnalyticsDataAsyncClient:
+    """Returns a properly configured Google Analytics Data API async client."""
     return data_v1beta.BetaAnalyticsDataAsyncClient(
-        client_info=_CLIENT_INFO, credentials=_create_credentials()
+        client_info=_CLIENT_INFO, credentials=_create_credentials(credentials)
     )
 
 
-def create_admin_alpha_api_client() -> (
-    admin_v1alpha.AnalyticsAdminServiceAsyncClient
-):
-    """Returns a properly configured Google Analytics Admin API (alpha) async client.
-    Uses Application Default Credentials with read-only scope.
-    """
+def create_admin_alpha_api_client(
+    credentials: google.auth.credentials.Credentials | None = None,
+) -> admin_v1alpha.AnalyticsAdminServiceAsyncClient:
+    """Returns a properly configured Google Analytics Admin API (alpha) async client."""
     return admin_v1alpha.AnalyticsAdminServiceAsyncClient(
-        client_info=_CLIENT_INFO, credentials=_create_credentials()
+        client_info=_CLIENT_INFO, credentials=_create_credentials(credentials)
     )
 
 
