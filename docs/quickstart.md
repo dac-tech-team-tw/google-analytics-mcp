@@ -171,6 +171,52 @@ The first connection will open a browser window for Google login. After authoriz
 - If `ALLOW_DOMAINS` is unset or empty, any Google account may log in
 - The allowlist is checked when the OAuth session is issued or refreshed, not on every MCP request
 
+### Testing `ALLOW_DOMAINS`
+
+After deployment, validate both an allowed account and a rejected account.
+
+Recommended approach:
+
+1. Configure `ALLOW_DOMAINS` with one or more exact domains, for example:
+   ```bash
+   ALLOW_DOMAINS=company-a.com|company-b.com
+   ```
+2. Connect your MCP client to the deployed `/mcp` endpoint.
+3. Sign in with an email from an allowed domain. Expected result:
+   - OAuth completes successfully
+   - MCP login succeeds
+   - GA4 tools can be called normally
+4. Sign in with an email outside the allowlist. Expected result:
+   - OAuth callback reaches the server
+   - token exchange fails with:
+     ```text
+     invalid_grant: This Google account is not allowed to use this server.
+     ```
+
+Tips:
+
+- Use an incognito window or a separate browser profile when switching between Google accounts.
+- If you change `ALLOW_DOMAINS`, re-run a fresh login to verify the new behavior.
+- If your production service is already in use, validate changes on a temporary staging Cloud Run service first.
+
+### Updating `ALLOW_DOMAINS` on Cloud Run
+
+To change the allowlist without changing other settings:
+
+```bash
+gcloud run services update "${SERVICE_NAME}" \
+  --region="${REGION}" \
+  --update-env-vars="ALLOW_DOMAINS=company-a.com|company-b.com"
+```
+
+To remove the restriction entirely:
+
+```bash
+gcloud run services update "${SERVICE_NAME}" \
+  --region="${REGION}" \
+  --remove-env-vars="ALLOW_DOMAINS"
+```
+
 ---
 
 ## One-Command Redeploy
@@ -229,6 +275,22 @@ During login, users may see **"This app isn't verified"**. This is expected whil
 **For internal teams**: Add team members' Google accounts to the [Test users](https://console.cloud.google.com/apis/credentials/consent) list. They can proceed by clicking **Advanced → Go to (unsafe)**.
 
 **For public deployment**: Submit your app for [Google OAuth verification](https://support.google.com/cloud/answer/9110914). You will need a Privacy Policy URL and the `analytics.readonly` scope justification.
+
+---
+
+## Troubleshooting
+
+### `invalid_grant: This Google account is not allowed to use this server.`
+
+This means the OAuth flow reached the server, but the user's email domain did
+not match `ALLOW_DOMAINS`.
+
+Check:
+
+- `ALLOW_DOMAINS` is set to the exact domains you intend to allow
+- the user's Google account email really ends with one of those exact domains
+- you are testing with a fresh login, not relying on a previously authorized browser session
+- the latest Cloud Run revision with the updated environment variable is serving traffic
 
 ---
 

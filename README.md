@@ -75,6 +75,8 @@ Behavior:
 - `user@openai.com` is allowed
 - `user@sub.openai.com` is rejected unless `sub.openai.com` is explicitly listed
 - If `ALLOW_DOMAINS` is unset or empty, any Google account may log in
+- Disallowed accounts are rejected during OAuth callback / token exchange with:
+  `invalid_grant: This Google account is not allowed to use this server.`
 
 The check runs when FastMCP issues or refreshes the user's session token. It
 does not re-check on every MCP request.
