@@ -54,6 +54,44 @@ Users need to re-authenticate only when:
 
 ---
 
+### Q: What does `ALLOW_DOMAINS` do?
+
+`ALLOW_DOMAINS` is an optional environment variable that restricts which Google
+accounts may complete OAuth login for this server.
+
+Example:
+
+```bash
+ALLOW_DOMAINS=google.com|openai.com
+```
+
+Behavior:
+
+- `user@google.com` is allowed
+- `user@openai.com` is allowed
+- `user@sub.openai.com` is rejected unless `sub.openai.com` is explicitly listed
+- if `ALLOW_DOMAINS` is unset or empty, any Google account may log in
+
+The match is based on the exact email domain and is case-insensitive.
+
+---
+
+### Q: Why do I see `invalid_grant: This Google account is not allowed to use this server.`?
+
+This is the expected error when the OAuth flow succeeds, but the Google
+account's email domain is not included in `ALLOW_DOMAINS`.
+
+The rejection happens during OAuth session issuance or refresh, before the user
+receives a usable MCP session token.
+
+Common causes:
+
+- the email domain is not listed in `ALLOW_DOMAINS`
+- a parent domain is listed but the actual account uses a subdomain
+- the Cloud Run service is still serving an older revision without the latest environment variable change
+
+---
+
 ### Q: What happens when Cloud Run restarts?
 
 FastMCP's `GoogleProvider` stores OAuth session state (including the refresh token) using `client_storage`, which defaults to the **local file system** via `platformdirs`.
@@ -126,3 +164,14 @@ The server only reads GA4 data. No write operations are performed.
 ### Q: Can a user access GA4 properties they don't own?
 
 No. The access token belongs to the authenticated user. GA4 API calls made with their token can only access properties that user's Google account has been granted access to in GA4. There is no privilege escalation — each user sees exactly what they would see in the GA4 web interface.
+
+---
+
+### Q: Is `ALLOW_DOMAINS` checked on every MCP request?
+
+No. In this server, `ALLOW_DOMAINS` is checked when FastMCP issues or refreshes
+the OAuth session. It is not re-checked on every MCP request.
+
+This keeps request handling simple and avoids adding per-request authorization
+overhead. If you change `ALLOW_DOMAINS`, validate the new behavior with a fresh
+login.
