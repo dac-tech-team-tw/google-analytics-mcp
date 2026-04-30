@@ -99,3 +99,40 @@ or configure your MCP client with:
 Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 Upstream changes from [googleanalytics/google-analytics-mcp](https://github.com/googleanalytics/google-analytics-mcp) can be merged via standard git upstream workflow.
+
+## Local Git Hook
+
+This fork includes a lightweight `pre-push` hook that runs the formatting
+check before pushing:
+
+```bash
+bash scripts/install-git-hooks.sh
+```
+
+After installation, every `git push` will run:
+
+```bash
+nox -s lint
+```
+
+If you have not installed development dependencies yet:
+
+```bash
+pip install -e .[dev]
+```
+
+## GitHub Main Branch Rule
+
+To require pull requests before merging to `main`, and to block force pushes
+and branch deletion, run:
+
+```bash
+bash scripts/configure-main-ruleset.sh
+```
+
+The script uses the current `origin` remote by default. To target a different
+repository or branch:
+
+```bash
+REPO_SLUG=owner/repo TARGET_BRANCH=main bash scripts/configure-main-ruleset.sh
+```
