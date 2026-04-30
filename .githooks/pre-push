@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if ! command -v nox >/dev/null 2>&1; then
+  echo "pre-push: 'nox' is not installed."
+  echo "Install dev dependencies first: pip install -e .[dev]"
+  exit 1
+fi
+
+echo "pre-push: running formatting check"
+nox -s lint
