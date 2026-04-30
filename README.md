@@ -57,8 +57,27 @@ See **[docs/quickstart.md](docs/quickstart.md)** for the full Cloud Run deployme
 The short version:
 
 1. Create a Google OAuth 2.0 Client ID (Web application)
-2. Deploy the Docker image to Cloud Run with 4 environment variables
+2. Deploy the Docker image to Cloud Run with the required environment variables
 3. Connect your MCP client to `https://<your-service>.run.app/mcp`
+
+### Optional login restriction: `ALLOW_DOMAINS`
+
+If you want to restrict which Google accounts may use your deployed server,
+set `ALLOW_DOMAINS` to a pipe-delimited allowlist of exact email domains:
+
+```bash
+ALLOW_DOMAINS=google.com|openai.com
+```
+
+Behavior:
+
+- `user@google.com` is allowed
+- `user@openai.com` is allowed
+- `user@sub.openai.com` is rejected unless `sub.openai.com` is explicitly listed
+- If `ALLOW_DOMAINS` is unset or empty, any Google account may log in
+
+The check runs when FastMCP issues or refreshes the user's session token. It
+does not re-check on every MCP request.
 
 ---
 

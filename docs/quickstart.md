@@ -95,7 +95,8 @@ gcloud run deploy "${SERVICE_NAME}" \
   --set-env-vars="GOOGLE_CLIENT_ID=YOUR_CLIENT_ID" \
   --set-env-vars="GOOGLE_CLIENT_SECRET=YOUR_CLIENT_SECRET" \
   --set-env-vars="JWT_SIGNING_KEY=YOUR_JWT_SIGNING_KEY" \
-  --set-env-vars="BASE_URL=https://placeholder.run.app"
+  --set-env-vars="BASE_URL=https://placeholder.run.app" \
+  --set-env-vars="ALLOW_DOMAINS=google.com|openai.com"
 ```
 
 After deploy, get the actual service URL:
@@ -160,7 +161,15 @@ The first connection will open a browser window for Google login. After authoriz
 | `GOOGLE_CLIENT_SECRET` | Yes | OAuth 2.0 Client Secret |
 | `BASE_URL` | Yes | Public URL of the Cloud Run service (no trailing slash) |
 | `JWT_SIGNING_KEY` | Yes | Secret for signing FastMCP session tokens (hex string) |
+| `ALLOW_DOMAINS` | No | Pipe-delimited allowlist of exact email domains allowed to log in, e.g. `google.com|openai.com` |
 | `PORT` | No | Port to listen on (Cloud Run sets this automatically, default 8000) |
+
+### `ALLOW_DOMAINS` behavior
+
+- `user@google.com` is allowed when `google.com` is listed
+- `user@sub.google.com` is rejected unless `sub.google.com` is also listed
+- If `ALLOW_DOMAINS` is unset or empty, any Google account may log in
+- The allowlist is checked when the OAuth session is issued or refreshed, not on every MCP request
 
 ---
 
